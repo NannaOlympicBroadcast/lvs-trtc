@@ -118,3 +118,5 @@ frontend/   Vue 3 SPA（trtc-sdk-v5）+ nginx 网关（/api /ws /storage 反代�
 
 - 私有视频/未上架视频的对象 URL 为不可猜测的随机 key（MinIO 桶公共读 + nginx 反代），未走逐请求签名；如需更强隔离可改为 API 代理流式输出。
 - 直播间密码、私有视频解锁密码明文存库（仅限内网使用场景）。
+- **Let's Encrypt 证书验证**：为了支持通过 CDN（如腾讯云 EdgeOne）直连容器时申请 SSL 证书，已在 `docker-compose.yml` 中将宿主机 `/www/wwwroot/video.haiyanfl.cn/.well-known` 目录挂载至前端容器内。
+
