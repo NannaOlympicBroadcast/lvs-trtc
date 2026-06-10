@@ -8,7 +8,8 @@
 
 ```bash
 cp .env.example .env
-# 必改：LAN_IP 设为宿主机的局域网 IP（播放/下载直链依赖它）
+# 必改（局域网部署）：LAN_IP 设为宿主机的局域网 IP（播放/下载直链依赖它）
+# 必改（公网域名部署）：若通过公网域名访问，请直接在 .env 中配置 PUBLIC_BASE_URL（如 https://yourdomain.com），此时无需配置 LAN_IP
 # 必改：TRTC_SDK_APP_ID / TRTC_SECRET_KEY（腾讯云 TRTC 控制台创建应用获取，直播/连麦必需）
 # 可改：WEB_HTTP_PORT / WEB_HTTPS_PORT（nginx 对外服务总端口，默认 80/443）
 docker compose up -d --build

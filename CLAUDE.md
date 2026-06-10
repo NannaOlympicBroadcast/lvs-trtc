@@ -9,7 +9,7 @@ LAN Video Station (局域网全栈视频站) — a self-hosted video platform fo
 ## Commands
 
 ```bash
-# Full stack (the intended way to run everything; requires LAN_IP and TRTC credentials in .env)
+# Full stack (the intended way to run everything; requires LAN_IP or PUBLIC_BASE_URL and TRTC credentials in .env)
 cp .env.example .env
 docker compose up -d --build
 
