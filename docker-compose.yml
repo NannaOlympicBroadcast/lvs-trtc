@@ -1,7 +1,8 @@
 version: "3.8"
 
 # 局域网全栈视频站 LAN Video Station
-# 服务: postgres / redis / minio / srs(流媒体) / api(后端) / web(前端+网关) / cdn-edge(可横向扩展)
+# 服务: postgres / redis / minio / api(后端) / web(前端+网关)
+# 直播与连麦基于腾讯云 TRTC（需在 .env 配置 TRTC_SDK_APP_ID / TRTC_SECRET_KEY）
 services:
   postgres:
     image: postgres:16-alpine
@@ -50,23 +51,6 @@ services:
       retries: 20
     networks: [lvs]
 
-  srs:
-    image: ossrs/srs:5
-    restart: unless-stopped
-    command: ["./objs/srs", "-c", "conf/lvs.conf"]
-    environment:
-      # 局域网内本机 IP，WebRTC 必须；改成宿主机的局域网地址
-      CANDIDATE: ${LAN_IP:-192.168.1.100}
-    ports:
-      - "1935:1935"        # RTMP 推流
-      - "8080:8080"        # HTTP-FLV / HLS
-      - "1985:1985"        # SRS HTTP API / WHIP / WHEP
-      - "8000:8000/udp"    # WebRTC UDP
-      - "8000:8000/tcp"    # WebRTC TCP 回落（弱网抗丢包）
-    volumes:
-      - ./srs/lvs.conf:/usr/local/srs/conf/lvs.conf:ro
-    networks: [lvs]
-
   api:
     build: ./backend
     restart: unless-stopped
@@ -82,13 +66,11 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change_me_jwt_secret}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
-      # 站点对外地址（局域网），用于拼接播放直链/推流地址
-      PUBLIC_BASE_URL: http://${LAN_IP:-192.168.1.100}
-      SRS_RTMP_HOST: ${LAN_IP:-192.168.1.100}
-      SRS_HTTP_INTERNAL: http://srs:8080
-      SRS_API_INTERNAL: http://srs:1985
-      SRS_RTMP_INTERNAL: rtmp://srs:1935
-      SRS_CALLBACK_SECRET: ${SRS_CALLBACK_SECRET:-srs_cb_secret}
+      # 站点对外地址（局域网），用于拼接播放/下载直链；端口随 WEB_HTTP_PORT
+      PUBLIC_BASE_URL: http://${LAN_IP:-192.168.1.100}:${WEB_HTTP_PORT:-80}
+      # 腾讯云 TRTC（直播/连麦）
+      TRTC_SDK_APP_ID: ${TRTC_SDK_APP_ID:-}
+      TRTC_SECRET_KEY: ${TRTC_SECRET_KEY:-}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -99,27 +81,10 @@ services:
     build: ./frontend
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"   # HTTPS（自签证书，网页推流/连麦需要安全上下文）
-    depends_on: [api, srs]
-    networks: [lvs]
-
-  # ---- CDN 边缘节点（可复制多份 / 在其他机器单独部署）----
-  cdn-edge-1:
-    build: ./cdn-edge
-    restart: unless-stopped
-    environment:
-      EDGE_NAME: edge-1
-      # 回源地址：直播回源 SRS，点播回源 MinIO
-      ORIGIN_LIVE: http://srs:8080
-      ORIGIN_STORAGE: http://minio:9000
-      # 自动向 API 注册本节点（base_url 为观众可访问到的地址）
-      API_BASE: http://api:3000
-      EDGE_PUBLIC_URL: http://${LAN_IP:-192.168.1.100}:8081
-      REGISTER_TOKEN: ${CDN_REGISTER_TOKEN:-cdn_register_secret}
-    ports:
-      - "8081:80"
-    depends_on: [srs, minio]
+      # nginx 对外服务总端口（.env 可自定义，如 WEB_HTTP_PORT=8080）
+      - "${WEB_HTTP_PORT:-80}:80"
+      - "${WEB_HTTPS_PORT:-443}:443"   # HTTPS（自签证书，网页推流/连麦需要安全上下文）
+    depends_on: [api]
     networks: [lvs]
 
 volumes:

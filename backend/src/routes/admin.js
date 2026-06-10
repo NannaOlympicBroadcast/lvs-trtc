@@ -3,8 +3,7 @@
 const express = require('express');
 const db = require('../db/pool');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
-const { emitToUser, emitToAdmins } = require('../lib/events');
-const { kickStream, streamUrls, listStreams } = require('../lib/srs');
+const { emitToUser, emitToAdmins, emitRoomEvent } = require('../lib/events');
 
 const router = express.Router();
 router.use(requireAuth, requireAdmin);
@@ -83,27 +82,28 @@ router.get('/rooms', async (_req, res, next) => {
     const { rows } = await db.query(
       `SELECT r.*, u.username AS owner_name FROM live_rooms r JOIN users u ON u.id = r.owner_id
        ORDER BY r.is_live DESC, r.created_at DESC LIMIT 200`);
-    res.json(rows.map((r) => ({ ...r, urls: streamUrls(r.stream_key) })));
+    res.json(rows);
   } catch (e) { next(e); }
 });
 
-// 审核 API：断流直播间
+// 审核 API：断流直播间（TRTC 模式为协同断流：标记下播 + 广播 live.cut，
+// 本站前端收到后立即退出 TRTC 房间停止推/拉流；不依赖腾讯云服务端踢人 REST API）
 router.post('/rooms/:id/cut', async (req, res, next) => {
   try {
-    const { rows } = await db.query('SELECT * FROM live_rooms WHERE id = $1', [req.params.id]);
+    const { rows } = await db.query(
+      `SELECT r.*, u.username AS owner_name FROM live_rooms r JOIN users u ON u.id = r.owner_id WHERE r.id = $1`,
+      [req.params.id]);
     const room = rows[0];
     if (!room) return res.status(404).json({ error: 'room not found' });
-    const result = await kickStream(room.stream_key);
-    // 同时断掉该房间所有连麦流
-    const mics = await db.query(`SELECT stream_name FROM mic_sessions WHERE room_id = $1 AND status = 'live'`, [room.id]);
-    for (const m of mics.rows) await kickStream(m.stream_name).catch(() => {});
-    res.json({ ok: true, ...result, reason: (req.body && req.body.reason) || null });
+    const reason = (req.body && req.body.reason) || null;
+    await db.query(`UPDATE live_rooms SET is_live = false WHERE id = $1`, [room.id]);
+    await db.query(`UPDATE mic_sessions SET status = 'ended', updated_at = now()
+                    WHERE room_id = $1 AND status IN ('requested','approved','live')`, [room.id]);
+    await emitRoomEvent(room, 'live.cut', { roomTitle: room.title, reason });
+    await emitRoomEvent(room, 'live.stopped', { roomTitle: room.title, cut: true, reason });
+    await emitToUser(room.owner_id, 'live.cut', { roomId: room.id, reason });
+    res.json({ ok: true, reason });
   } catch (e) { next(e); }
-});
-
-// SRS 当前所有流（监控）
-router.get('/streams', async (_req, res, next) => {
-  try { res.json(await listStreams()); } catch (e) { next(e); }
 });
 
 // ---- 用户管理 / 封禁 ----

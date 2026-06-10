@@ -86,12 +86,12 @@
     <!-- 直播间 -->
     <div v-show="tab === 'rooms'" class="card">
       <table>
-        <tr><th>直播间</th><th>主播</th><th>状态</th><th>直链</th><th>操作</th></tr>
+        <tr><th>直播间</th><th>主播</th><th>状态</th><th>TRTC 房间号</th><th>操作</th></tr>
         <tr v-for="r in rooms" :key="r.id">
           <td><router-link :to="`/live/${r.id}`">{{ r.title }}</router-link></td>
           <td>{{ r.owner_name }}</td>
           <td><span class="tag" :class="{ live: r.is_live }">{{ r.is_live ? '直播中' : '离线' }}</span></td>
-          <td class="muted" style="max-width:280px;word-break:break-all"><code v-if="r.is_live">{{ r.urls.flv }}</code></td>
+          <td class="muted" style="max-width:280px;word-break:break-all"><code>{{ r.stream_key }}</code></td>
           <td><button v-if="r.is_live" class="danger" @click="cut(r)">断流</button></td>
         </tr>
       </table>
@@ -99,25 +99,18 @@
 
     <!-- CDN -->
     <div v-show="tab === 'cdn'" class="card form-grid">
-      <h3>CDN 节点</h3>
-      <p class="muted">局域网边缘节点：自建 cdn-edge，自动注册 + 健康检查。公网 CDN：腾讯云 CDN / Cloudflare 等，源站需指向本站 <code>/storage/</code> 路径，此处填写其访问域名（如 <code>https://cdn.example.com</code>）。</p>
+      <h3>公网 CDN 节点</h3>
+      <p class="muted">公网 CDN（腾讯云 CDN / Cloudflare 等）：源站配置指向本站 <code>/storage/</code> 路径，此处填写其访问域名（如 <code>https://cdn.example.com</code>），点播播放将在启用节点间轮询调度（<code>?cdn=off</code> 强制回源）。</p>
       <div class="row">
         <input v-model="cdnForm.name" placeholder="节点名" style="max-width:160px" />
-        <select v-model="cdnForm.type" style="max-width:170px">
-          <option value="edge">局域网边缘节点</option>
-          <option value="public">公网 CDN</option>
-        </select>
-        <input v-model="cdnForm.base_url"
-          :placeholder="cdnForm.type === 'public' ? 'https://cdn.example.com' : 'http://edge-ip:8081'"
-          style="max-width:260px" />
+        <input v-model="cdnForm.base_url" placeholder="https://cdn.example.com" style="max-width:260px" />
         <button @click="addNode">添加节点</button>
         <button class="ghost" @click="checkNodes">健康检查</button>
       </div>
       <table>
-        <tr><th>名称</th><th>类型</th><th>地址</th><th>启用</th><th>最后心跳</th><th></th></tr>
+        <tr><th>名称</th><th>地址</th><th>启用</th><th>最后心跳</th><th></th></tr>
         <tr v-for="n in nodes" :key="n.id">
           <td>{{ n.name }} <span v-if="health[n.id] !== undefined" class="tag" :class="health[n.id] ? 'ok' : 'warn'">{{ health[n.id] ? '健康' : '不可达' }}</span></td>
-          <td><span class="tag">{{ n.type === 'public' ? '公网 CDN' : '边缘节点' }}</span></td>
           <td><code>{{ n.base_url }}</code></td>
           <td><input type="checkbox" style="width:auto" :checked="n.enabled" @change="toggleNode(n, $event)" /></td>
           <td class="muted">{{ n.last_seen_at ? new Date(n.last_seen_at).toLocaleString() : '-' }}</td>
@@ -154,7 +147,7 @@ const tabs = [
 const tab = ref('review');
 const videos = ref([]), videoStatus = ref('pending'), reviewRequired = ref(true);
 const reports = ref([]), users = ref([]), userQ = ref(''), rooms = ref([]), nodes = ref([]);
-const cdnForm = ref({ name: '', base_url: '', type: 'edge' });
+const cdnForm = ref({ name: '', base_url: '' });
 const health = ref({});
 const liveEvents = ref([]), wsOk = ref(false);
 let ws = null;
@@ -212,7 +205,7 @@ async function cut(r) {
 async function loadNodes() { nodes.value = await api('/cdn/nodes'); }
 async function addNode() {
   await api('/cdn/nodes', { method: 'POST', body: { ...cdnForm.value } });
-  cdnForm.value = { name: '', base_url: '', type: 'edge' };
+  cdnForm.value = { name: '', base_url: '' };
   loadNodes();
 }
 async function toggleNode(n, e) {

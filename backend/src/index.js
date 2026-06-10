@@ -30,7 +30,6 @@ async function main() {
   app.use('/api/live', require('./routes/live'));
   app.use('/api/admin', require('./routes/admin'));
   app.use('/api/cdn', require('./routes/cdn'));
-  app.use('/api/callbacks/srs', require('./routes/callbacks'));
 
   app.use(errorHandler);
 

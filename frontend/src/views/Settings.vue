@@ -22,10 +22,25 @@
     </div>
 
     <div class="card form-grid" style="margin-bottom:14px">
+      <h3>🤖 让你的 Agent（Claude、Codex、Antigravity、Manus、OpenClaw 等）操作站点</h3>
+      <p class="muted">
+        本站全部功能（上传/审核/直播/连麦/管理）均开放 API，接口说明见
+        <a :href="agentsDocUrl" target="_blank"><code>{{ agentsDocUrl }}</code></a>。
+        在上方创建 API Key 后，将以下内容发送给你的 Agent：
+      </p>
+      <textarea readonly rows="3" :value="agentPrompt" style="font-family:monospace"></textarea>
+      <div class="row">
+        <button @click="copyAgentPrompt">复制提示词</button>
+        <span v-if="copied" class="tag ok">已复制</span>
+      </div>
+      <p v-if="!newKey" class="muted">提示：API Key 完整值仅在创建时显示一次；上面模板中的 Key 占位符需替换为你保存的真实 Key。</p>
+    </div>
+
+    <div class="card form-grid" style="margin-bottom:14px">
       <h3>事件 Webhook</h3>
       <p class="muted">
         可监听: video.uploaded, video.review.approved, video.review.rejected, video.taken_down,
-        video.comment.created, account.banned, live.started, live.stopped, mic.requested, recording.stored 等。
+        video.comment.created, account.banned, live.started, live.stopped, mic.requested 等。
         留空 = 全部。POST JSON，带 <code>X-LVS-Event</code> 与 <code>X-LVS-Signature</code>(HMAC-SHA256) 头。
         也可直接连接 WebSocket：<code>ws://站点/ws?token=&lt;JWT 或 API Key&gt;</code>
       </p>
@@ -59,12 +74,26 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { api } from '../api';
 
 const keys = ref([]), newKey = ref(''), keyName = ref('');
 const webhooks = ref([]), events = ref([]);
 const whForm = ref({ url: '', secret: '', events: '' });
+const copied = ref(false);
+
+// Agent 接入：提示词模板（刚创建的 Key 自动填入，否则留占位符）
+const agentsDocUrl = computed(() => `${location.origin}/agents.md`);
+const agentPrompt = computed(() =>
+  `请阅读\`${agentsDocUrl.value}\`，然后执行_____操作，你的api-key为\`${newKey.value || '<你的API-KEY>'}\``);
+
+async function copyAgentPrompt() {
+  try {
+    await navigator.clipboard.writeText(agentPrompt.value);
+    copied.value = true;
+    setTimeout(() => { copied.value = false; }, 2000);
+  } catch { alert('复制失败，请手动选择文本复制'); }
+}
 
 async function load() {
   keys.value = await api('/keys');

@@ -16,14 +16,12 @@ module.exports = {
   buckets: { videos: 'videos', thumbnails: 'thumbnails', subtitles: 'subtitles', recordings: 'recordings' },
   // 对外地址（观众浏览器可达）
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || 'http://localhost').replace(/\/$/, ''),
-  srs: {
-    rtmpHost: process.env.SRS_RTMP_HOST || 'localhost',           // 对外 RTMP 推流主机
-    httpInternal: process.env.SRS_HTTP_INTERNAL || 'http://srs:8080', // 容器内 FLV/HLS
-    apiInternal: process.env.SRS_API_INTERNAL || 'http://srs:1985',   // 容器内 SRS API
-    rtmpInternal: process.env.SRS_RTMP_INTERNAL || 'rtmp://srs:1935', // 容器内 RTMP（录制用）
-    callbackSecret: process.env.SRS_CALLBACK_SECRET || 'srs_cb_secret'
+  // 腾讯云 TRTC（直播/连麦）：控制台创建应用后填入；未配置时直播相关接口返回明确错误
+  trtc: {
+    sdkAppId: process.env.TRTC_SDK_APP_ID ? parseInt(process.env.TRTC_SDK_APP_ID, 10) : 0,
+    secretKey: process.env.TRTC_SECRET_KEY || '',
+    sigExpire: parseInt(process.env.TRTC_SIG_EXPIRE || String(7 * 86400), 10) // UserSig 有效期（秒）
   },
-  cdnRegisterToken: process.env.CDN_REGISTER_TOKEN || 'cdn_register_secret',
   admin: {
     username: process.env.ADMIN_USERNAME || 'admin',
     password: process.env.ADMIN_PASSWORD || 'admin12345'

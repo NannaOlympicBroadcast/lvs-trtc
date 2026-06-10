@@ -8,18 +8,20 @@
       <router-link :to="`/live/${room.id}`"><button class="ghost">观众视角</button></router-link>
     </div>
 
+    <p v-if="room.trtc_error" class="notice-text" style="color:var(--danger)">{{ room.trtc_error }}</p>
+
     <!-- 3-Column Layout -->
     <div class="studio-layout">
       <!-- Left Column: Web Push & Mic Management -->
       <div class="studio-left">
-        <!-- Option 1: Web Push -->
+        <!-- Option 1: Web Push via TRTC -->
         <div class="card form-grid">
-          <h3>方式一：网页推流（摄像头/屏幕）</h3>
-          <video ref="preview" autoplay muted playsinline style="max-height:300px; background: #000;"></video>
+          <h3>方式一：网页开播（TRTC 摄像头/屏幕）</h3>
+          <div ref="preview" class="trtc-preview"></div>
           <div class="row">
-            <button v-if="!publishing" @click="startWebPush('camera')">📷 摄像头开播</button>
-            <button v-if="!publishing" class="ghost" @click="startWebPush('screen')">🖥️ 屏幕共享开播</button>
-            <button v-else class="danger" @click="stopWebPush">停止网页推流</button>
+            <button v-if="!publishing" @click="startWebPush('camera')" :disabled="!!room.trtc_error">📷 摄像头开播</button>
+            <button v-if="!publishing" class="ghost" @click="startWebPush('screen')" :disabled="!!room.trtc_error">🖥️ 屏幕共享开播</button>
+            <button v-else class="danger" @click="stopWebPush">下播</button>
           </div>
         </div>
 
@@ -27,10 +29,13 @@
         <div class="card">
           <h3>连麦管理</h3>
           <table>
-            <tr><th>用户ID</th><th>请求时间</th><th>动作</th></tr>
+            <tr><th>用户</th><th>状态/画面</th><th>动作</th></tr>
             <tr v-for="m in mics" :key="m.id">
-              <td>{{ m.username }}</td>
-              <td>{{ m.created_at ? new Date(m.created_at).toLocaleString() : '未知' }}</td>
+              <td>{{ m.username }}<br /><span class="muted">{{ m.created_at ? new Date(m.created_at).toLocaleString() : '' }}</span></td>
+              <td>
+                <div v-if="m.status === 'live'" :ref="(el) => setGuestEl(m.rtc_user_id, el)" class="trtc-guest"></div>
+                <span v-else class="tag warn">{{ m.status === 'requested' ? '等待处理' : m.status }}</span>
+              </td>
               <td class="row">
                 <template v-if="m.status === 'requested'">
                   <button @click="decide(m, true)">接受</button>
@@ -52,58 +57,47 @@
 
         <!-- Live Management Tab -->
         <div v-show="tab === 'stream'" class="card form-grid">
-          <h3>方式二：OBS 等软件 RTMP 推流</h3>
-          
-          <div class="input-copy-group">
+          <h3>方式二：OBS 等软件 RTMP 推流进 TRTC 房间</h3>
+          <p class="muted">需开通腾讯云 RTC-Engine 基础版/专业版套餐。OBS 推流后请点击下方「标记开播」让观众进入；
+            停止推流后点「标记下播」。</p>
+
+          <div class="input-copy-group" v-if="rtmpPush">
             <span class="label">服务器：</span>
             <div class="input-copy-row">
-              <input readonly :value="rtmpServer" class="copy-input" />
-              <button class="copy-btn" @click="copyText(rtmpServer)" title="复制">
+              <input readonly :value="rtmpPush.server" class="copy-input" />
+              <button class="copy-btn" @click="copyText(rtmpPush.server)" title="复制">
                 <svg class="copy-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z" /></svg>
               </button>
             </div>
           </div>
 
-          <div class="input-copy-group">
+          <div class="input-copy-group" v-if="rtmpPush">
             <span class="label">推流码：</span>
             <div class="input-copy-row">
-              <input readonly :value="streamKeyOnly" class="copy-input" />
-              <button class="copy-btn" @click="copyText(streamKeyOnly)" title="复制">
+              <input readonly :value="rtmpPush.stream_key" class="copy-input" />
+              <button class="copy-btn" @click="copyText(rtmpPush.stream_key)" title="复制">
                 <svg class="copy-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z" /></svg>
               </button>
             </div>
           </div>
 
-          <h3>播放直链（API 可获取）</h3>
-          <div class="url-list" v-if="urls">
-            <div class="url-item">
-              <span class="url-label">FLV:</span>
-              <code class="url-code">{{ urls.flv }}</code>
-            </div>
-            <div class="url-item">
-              <span class="url-label">HLS:</span>
-              <code class="url-code">{{ urls.hls }}</code>
-            </div>
-            <div class="url-item">
-              <span class="url-label">WebRTC:</span>
-              <code class="url-code">{{ urls.whep }}</code>
-            </div>
+          <div class="row" style="margin-top:10px">
+            <button class="ghost" v-if="!room.is_live" @click="markLive(true)">📡 标记开播</button>
+            <button class="ghost" v-else @click="markLive(false)">⏹ 标记下播</button>
           </div>
 
-          <div class="row" style="margin-top: 10px;">
-            <button class="ghost" @click="toggleRecording" :disabled="!room.is_live">
-              {{ recording ? '⏹ 停止录制' : '⏺ 开始录制' }}
-            </button>
+          <h3 style="margin-top:14px">TRTC 房间信息</h3>
+          <div class="url-list">
+            <div class="url-item">
+              <span class="url-label">房间号:</span>
+              <code class="url-code">{{ room.stream_key }}</code>
+            </div>
+            <div class="url-item" v-if="room.publish && room.publish.trtc">
+              <span class="url-label">SDKAppID:</span>
+              <code class="url-code">{{ room.publish.trtc.sdk_app_id }}</code>
+            </div>
           </div>
-          
-          <table v-if="recordings.length" class="recordings-table">
-            <tr><th>录制时间</th><th>状态</th><th>文件</th></tr>
-            <tr v-for="r in recordings" :key="r.id">
-              <td>{{ new Date(r.started_at).toLocaleString() }}</td>
-              <td><span class="tag" :class="{ ok: r.status === 'stored', warn: r.status === 'recording' }">{{ r.status }}</span></td>
-              <td><a v-if="r.url" :href="r.url" target="_blank">下载</a></td>
-            </tr>
-          </table>
+          <p class="muted">录制说明：服务端录制已随 SRS 移除；如需录制请在腾讯云控制台开通 TRTC 云端录制。</p>
         </div>
 
         <!-- Settings Tab -->
@@ -130,8 +124,8 @@
         <!-- Events Webhook Tab -->
         <div v-show="tab === 'webhooks'" class="card form-grid">
           <h3>直播间事件回调（Webhook）</h3>
-          <p class="muted">可监听: live.started, live.stopped, room.user.joined, room.user.left, chat.message,
-            mic.requested, mic.approved, mic.rejected, mic.live, mic.ended, recording.started, recording.stored。
+          <p class="muted">可监听: live.started, live.stopped, live.cut, room.user.joined, room.user.left, chat.message,
+            mic.requested, mic.approved, mic.rejected, mic.live, mic.ended。
             留空 = 全部事件。也可直接连接 <code>/ws?token=...</code> 以 WebSocket 实时接收。</p>
           <input v-model="whForm.url" placeholder="回调 URL（http://...）" />
           <input v-model="whForm.secret" placeholder="签名密钥（可选，HMAC-SHA256 于 X-LVS-Signature 头）" />
@@ -192,12 +186,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { api } from '../api';
 import { createWS } from '../ws';
-import { whipPublish } from '../whip';
-import { ensureCapture, mediaUrl, getCaptureStream, captureErrorText } from '../media';
+import { createTrtc, enterRoom, exitRoom, TRTC, trtcErrorText } from '../trtc';
+import { ensureCapture, captureErrorText } from '../media';
 import { useAuth } from '../store';
 
 const route = useRoute();
@@ -210,11 +204,11 @@ const tabs = [
   { key: 'webhooks', name: '事件回调' }
 ];
 const tab = ref('stream');
-const room = ref(null), urls = ref(null), mics = ref([]), blacklist = ref([]), webhooks = ref([]), recordings = ref([]);
+const room = ref(null), rtmpPush = ref(null), mics = ref([]), blacklist = ref([]), webhooks = ref([]);
 const form = ref({ title: '', description: '', password: '' });
 const whForm = ref({ url: '', secret: '', events: '' });
 const blackName = ref(''), notice = ref('');
-const publishing = ref(false), recording = ref(false);
+const publishing = ref(false);
 const preview = ref(null);
 
 // Chat-related state
@@ -225,22 +219,18 @@ const msgBox = ref(null);
 // Popup request state
 const activeMicRequest = ref(null);
 
-let pc = null, stream = null, ws = null;
-
-const rtmpServer = computed(() => room.value && room.value.publish ? room.value.publish.rtmp_publish.replace(/\/[^/]+$/, '') : '');
-const streamKeyOnly = computed(() => room.value ? room.value.stream_key : '');
+let trtc = null, inRoom = false, ws = null, screenSharing = false;
+const guestEls = new Map();     // rtc_user_id -> 容器元素
+const remoteVideos = new Map(); // `${userId}|${streamType}`
 
 async function load() {
   room.value = await api(`/live/rooms/${roomId}`);
   form.value = { title: room.value.title, description: room.value.description, password: room.value.password || '' };
-  const su = await api(`/live/rooms/${roomId}/stream-urls`);
-  urls.value = su.urls;
+  rtmpPush.value = room.value.publish ? room.value.publish.rtmp : null;
   mics.value = await api(`/live/rooms/${roomId}/mic`);
   blacklist.value = await api(`/live/rooms/${roomId}/blacklist`);
   webhooks.value = await api(`/live/rooms/${roomId}/webhooks`);
-  recordings.value = await api(`/live/rooms/${roomId}/recordings`);
-  recording.value = recordings.value.some((r) => r.status === 'recording');
-  
+
   // Load chat messages history
   const history = await api(`/live/rooms/${roomId}/messages`);
   messages.value = history.map((m) => ({ username: m.username, content: m.content }));
@@ -251,20 +241,64 @@ function scrollChat() {
   nextTick(() => { if (msgBox.value) msgBox.value.scrollTop = msgBox.value.scrollHeight; });
 }
 
+// ---- TRTC：主播进房 / 渲染连麦者画面 ----
+async function ensureTrtcRoom() {
+  if (inRoom) return;
+  trtc = createTrtc();
+  trtc.on(TRTC.EVENT.REMOTE_VIDEO_AVAILABLE, ({ userId, streamType }) => {
+    remoteVideos.set(`${userId}|${streamType}`, true);
+    renderGuest(userId, streamType);
+  });
+  trtc.on(TRTC.EVENT.REMOTE_VIDEO_UNAVAILABLE, ({ userId, streamType }) => {
+    remoteVideos.delete(`${userId}|${streamType}`);
+    trtc.stopRemoteVideo({ userId, streamType }).catch(() => {});
+  });
+  await enterRoom(trtc, room.value.publish.trtc, 'anchor');
+  inRoom = true;
+}
+
+async function leaveTrtcRoom() {
+  if (trtc) { await exitRoom(trtc); trtc = null; }
+  inRoom = false;
+  remoteVideos.clear();
+}
+
+async function renderGuest(userId, streamType) {
+  if (!trtc) return;
+  const el = guestEls.get(userId);
+  if (!el) return;
+  try { await trtc.startRemoteVideo({ userId, streamType, view: el }); }
+  catch (e) { notice.value = `连麦画面拉取失败: ${trtcErrorText(e)}`; }
+}
+
+function setGuestEl(rtcUserId, el) {
+  if (!el || guestEls.get(rtcUserId) === el) return;
+  guestEls.set(rtcUserId, el);
+  for (const key of remoteVideos.keys()) {
+    const [uid, st] = key.split('|');
+    if (uid === rtcUserId) renderGuest(uid, st);
+  }
+}
+
 function setupWS() {
   ws = createWS();
   ws.send({ type: 'join', roomId, password: form.value.password });
   ws.on((msg) => {
     // Reload data for mic and room control signals
-    if (['mic.requested', 'mic.live', 'mic.ended', 'live.started', 'live.stopped', 'recording.stored'].includes(msg.type)) {
+    if (['mic.requested', 'mic.live', 'mic.ended', 'live.started', 'live.stopped'].includes(msg.type)) {
       load();
       if (msg.type === 'mic.requested') {
         notice.value = `🎤 ${msg.username} 请求连麦`;
-        // Open the bottom-right popup
         activeMicRequest.value = { id: msg.micId, username: msg.username };
       }
     }
-    
+    // 管理员断流：立即退出 TRTC 房间停止推流
+    if (msg.type === 'live.cut') {
+      notice.value = `直播已被管理员断流${msg.reason ? `（${msg.reason}）` : ''}`;
+      stopWebPush(true);
+      load();
+    }
+
     // Handle chat panel events
     if (msg.scope === 'room') {
       if (msg.type === 'chat.message') {
@@ -288,49 +322,63 @@ function sendChat() {
   chatInput.value = '';
 }
 
+// ---- 网页开播（TRTC anchor 进房 + 本地采集发布） ----
 async function startWebPush(kind) {
   if (!ensureCapture()) return; // 摄像头/屏幕共享需要 HTTPS 安全上下文
+  if (!room.value.publish || !room.value.publish.trtc) {
+    notice.value = room.value.trtc_error || 'TRTC 未配置，无法开播';
+    return;
+  }
   try {
-    let pubOpts = { maxBitrate: 2500000, maxFramerate: 30 };
+    await ensureTrtcRoom();
+    await trtc.startLocalAudio().catch((e) => { notice.value = `⚠️ 麦克风不可用（${captureErrorText(e)}）`; });
     if (kind === 'screen') {
-      // 限制分辨率/帧率：高分屏原始采集会压垮浏览器软编码导致卡顿
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { width: { max: 1920 }, height: { max: 1080 }, frameRate: { ideal: 30, max: 30 } },
-        audio: true
-      });
-      const vt = stream.getVideoTracks()[0];
-      if (vt) vt.contentHint = 'motion'; // 优先流畅度（看视频/动态画面）；演示文档可改 'detail'
-      pubOpts = { maxBitrate: 4000000, maxFramerate: 30, degradationPreference: 'maintain-framerate' };
+      await trtc.startScreenShare({ view: preview.value });
+      screenSharing = true;
     } else {
-      const cap = await getCaptureStream();
-      stream = cap.stream;
-      if (cap.note) notice.value = `⚠️ ${cap.note}`;
+      await trtc.startLocalVideo({ view: preview.value });
     }
-    preview.value.srcObject = stream;
-    pc = await whipPublish(mediaUrl(room.value.publish.whip_publish), stream, pubOpts);
+    await api(`/live/rooms/${roomId}/live/start`, { method: 'POST' });
     publishing.value = true;
-    if (!notice.value.startsWith('⚠️')) notice.value = '网页推流已开始';
-  } catch (e) { notice.value = `推流失败: ${captureErrorText(e)}`; }
+    notice.value = '网页开播成功（TRTC）';
+    load();
+  } catch (e) {
+    notice.value = `开播失败: ${trtcErrorText(e)}`;
+    await leaveTrtcRoom();
+  }
 }
 
-function stopWebPush() {
-  if (pc) { pc.close(); pc = null; }
-  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
-  if (preview.value) preview.value.srcObject = null;
+async function stopWebPush(cutByAdmin = false) {
+  if (trtc) {
+    if (screenSharing) { try { await trtc.stopScreenShare(); } catch { /* 忽略 */ } }
+    try { await trtc.stopLocalVideo(); } catch { /* 忽略 */ }
+    try { await trtc.stopLocalAudio(); } catch { /* 忽略 */ }
+  }
+  screenSharing = false;
+  await leaveTrtcRoom();
   publishing.value = false;
+  if (!cutByAdmin && room.value && room.value.is_live) {
+    await api(`/live/rooms/${roomId}/live/stop`, { method: 'POST' }).catch(() => {});
+  }
+  load();
 }
 
-async function toggleRecording() {
+// OBS 推流场景：手动标记开播/下播
+async function markLive(start) {
   try {
-    if (recording.value) await api(`/live/rooms/${roomId}/recording/stop`, { method: 'POST' });
-    else await api(`/live/rooms/${roomId}/recording/start`, { method: 'POST' });
-    recording.value = !recording.value;
-    setTimeout(load, 1500);
+    await api(`/live/rooms/${roomId}/live/${start ? 'start' : 'stop'}`, { method: 'POST' });
+    notice.value = start ? '已标记开播' : '已标记下播';
+    // 主播网页端同时进房，便于查看连麦者画面
+    if (start && room.value.publish && room.value.publish.trtc) await ensureTrtcRoom().catch(() => {});
+    if (!start) await leaveTrtcRoom();
+    load();
   } catch (e) { notice.value = e.message; }
 }
 
 async function decide(m, approve) {
   await api(`/live/rooms/${roomId}/mic/${m.id}/decision`, { method: 'POST', body: { approve } });
+  // 同意连麦后确保主播已在 TRTC 房间内（能看到/听到连麦者）
+  if (approve && room.value.publish && room.value.publish.trtc) await ensureTrtcRoom().catch(() => {});
   load();
 }
 
@@ -397,7 +445,7 @@ async function copyText(text) {
 }
 
 onMounted(async () => { await load(); setupWS(); });
-onBeforeUnmount(() => { stopWebPush(); if (ws) ws.close(); });
+onBeforeUnmount(async () => { await stopWebPush(true); if (ws) ws.close(); });
 </script>
 
 <style scoped>
@@ -425,6 +473,23 @@ onBeforeUnmount(() => { stopWebPush(); if (ws) ws.close(); });
 .studio-right {
   width: 320px;
   flex-shrink: 0;
+}
+
+/* TRTC 渲染容器 */
+.trtc-preview {
+  width: 100%;
+  max-height: 300px;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.trtc-guest {
+  width: 160px;
+  aspect-ratio: 4 / 3;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 /* Copy group style */
@@ -495,7 +560,7 @@ onBeforeUnmount(() => { stopWebPush(); if (ws) ws.close(); });
 .url-label {
   font-weight: bold;
   color: var(--accent);
-  width: 60px;
+  width: 80px;
   flex-shrink: 0;
 }
 .url-code {
