@@ -12,6 +12,7 @@ cp .env.example .env
 # 必改：TRTC_SDK_APP_ID / TRTC_SECRET_KEY（腾讯云 TRTC 控制台创建应用获取，直播/连麦必需）
 # 可改：WEB_HTTP_PORT / WEB_HTTPS_PORT（nginx 对外服务总端口，默认 80/443）
 docker compose up -d --build
+# 提示：构建后端 Docker 镜像时，已配置使用中科大镜像源 (mirrors.ustc.edu.cn) 加速 Alpine apk 包 (ffmpeg) 的下载。
 ```
 
 | 入口 | 地址 |
