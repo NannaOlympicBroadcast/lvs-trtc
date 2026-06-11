@@ -7,7 +7,9 @@
 //          chat.message, mic.requested, mic.approved, mic.rejected, mic.ended,
 //          recording.started, recording.stored
 //  管理员: admin.video.uploaded, admin.live.started, admin.live.stopped,
-//          admin.chat.message, admin.stream.urls, admin.report.created
+//          admin.chat.message, admin.stream.urls, admin.report.created,
+//          admin.feedback.created, admin.user.banned
+//  聊天:   chat.message.new（系统消息/私聊新消息）; 举报: report.resolved
 const crypto = require('crypto');
 const db = require('../db/pool');
 const { redis } = require('./redis');

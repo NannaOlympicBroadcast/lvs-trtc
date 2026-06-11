@@ -17,12 +17,14 @@
 
 ## 一、普通用户接口
 
-注册/登录：
+注册/登录/个人资料：
 
 ```
 POST /api/auth/register        {username, password, email?}
 POST /api/auth/login           {username, password} → {token}（JWT）
 GET  /api/auth/me              当前用户信息
+PATCH /api/auth/profile        修改显示昵称/简介 {nickname?, bio?}（昵称留空回退用户名）
+POST /api/auth/password        修改密码 {old_password, new_password}
 ```
 
 API Key 与个人 Webhook：
@@ -54,6 +56,24 @@ DELETE /api/videos/:id/subtitles/:sid   删字幕
 POST /api/reports              举报 {target_type: video|comment, target_id, reason}
 GET  /api/reports/mine         我的举报
 ```
+
+聊天（端到端加密私聊 + 系统消息/反馈通道）：
+
+```
+PUT  /api/chat/keys                          上传聊天公钥 {public_key}（ECDH P-256 JWK 的 JSON 字符串）
+GET  /api/chat/keys/:userId                  查询某用户公钥
+GET  /api/chat/conversations                 会话列表（系统消息会话置顶；含 peer 公钥/最后消息/未读数）
+POST /api/chat/conversations                 发起私聊 {username 或 user_id}
+GET  /api/chat/conversations/:id/messages    消息历史（?before_id= 翻旧页，?limit=）
+POST /api/chat/conversations/:id/messages    发消息 {content, encrypted?, iv?}
+POST /api/chat/conversations/:id/read        标记已读
+```
+
+- 私聊（type=direct）强制端到端加密：双方先各自 `PUT /api/chat/keys` 上传 ECDH P-256 公钥；
+  发送方用 `ECDH(自己私钥, 对方公钥) → HKDF-SHA256(salt=32字节0, info="lvs-chat-v1") → AES-256-GCM`
+  加密，`content` 为密文 base64，`iv` 为 12 字节 IV 的 base64，`encrypted=true`。服务器只存密文，无法解密。
+- 系统消息会话（type=system，每用户默认一个）：站点通知（审核结果/举报受理/下架/封禁/新评论）会推送到这里；
+  用户在该会话发送的消息（明文）作为反馈直达管理员（触发管理员事件 `admin.feedback.created`）。
 
 收藏夹：
 
@@ -132,17 +152,91 @@ POST /api/admin/rooms/:id/cut                  断流 {reason?}（标记下播 +
 GET  /api/admin/users?q=                       用户搜索
 POST /api/admin/users/:id/ban                  封禁 {hours, reason}（hours=0 解封）
 GET  /api/admin/reports?status=open            举报列表
-POST /api/admin/reports/:id/resolve            处理 {action: resolved|dismissed, note?}
+POST /api/admin/reports/:id/resolve            处理 {action: resolved|dismissed, note?}（同时通知举报人）
+GET  /api/admin/feedback?limit=                全部用户反馈（系统消息会话中用户发送的内容）
+POST /api/admin/feedback/:userId/reply         回复反馈 {content}（写入该用户系统消息会话）
 GET  /api/admin/events?limit=                  管理员事件存档
 GET|POST|PATCH|DELETE /api/cdn/nodes           公网 CDN 节点管理 {name, base_url}
 POST /api/cdn/nodes/check                      节点健康检查
 ```
 
-## 四、事件推送
+## 四、事件推送（WebSocket / Webhook）
 
-- WebSocket：`ws(s)://站点/ws?token=<JWT 或 API Key>`。连接即收个人事件；发送 `{"type":"join","roomId":"...","password":"..."}` 进直播间收房间事件，`{"type":"chat","roomId":"...","content":"..."}` 发弹幕。管理员自动收全站事件。
-- Webhook：POST JSON，头 `X-LVS-Event`（事件类型）与 `X-LVS-Signature`（HMAC-SHA256 签名，密钥为配置的 secret）。
-- 常用事件：`video.uploaded`、`video.review.approved/rejected`、`video.taken_down`、`video.comment.created`、`account.banned`、`live.started`、`live.stopped`、`live.cut`、`chat.message`、`mic.requested/approved/rejected/live/ended`。
+### 订阅方式
+
+- WebSocket：`ws(s)://站点/ws?token=<JWT 或 API Key>`。连接即收个人事件；发送 `{"type":"join","roomId":"...","password":"..."}` 进直播间收房间事件，`{"type":"chat","roomId":"...","content":"..."}` 发弹幕。管理员自动收全站（admin scope）事件。
+- Webhook：在「个人设置 → 事件 Webhook」或 `POST /api/me/webhooks` 配置 `{url, secret?, events?[]}`（events 留空 = 全部）。事件以 POST JSON 投递，8 秒超时，不重试。
+- 事件存档：`GET /api/me/webhooks/events`（个人）/ `GET /api/admin/events`（管理员广播）。
+
+### 消息封包 Schema
+
+WebSocket 帧（JSON）：
+
+```json
+{
+  "scope":  "personal | admin | room",   // 事件通道：个人 / 管理员广播 / 直播间
+  "type":   "video.uploaded",            // 事件类型，见下表
+  "time":   "2026-01-01T00:00:00.000Z",  // ISO8601 发生时间
+  "...payload 字段（随事件类型，见下表）"
+}
+```
+
+Webhook 请求：
+
+```
+POST <你的回调URL>
+Content-Type: application/json
+X-LVS-Event: <事件类型>
+X-LVS-Signature: <hex(HMAC_SHA256(secret, 原始请求体))>
+
+{ "type": "...", "time": "...", ...payload }   // 无 scope 字段，其余与 WS 相同
+```
+
+### 事件类型与 payload 字段
+
+视频 / 创作者（personal scope，推给视频主）：
+
+| type | payload 字段 |
+|---|---|
+| `video.uploaded` | `videoId, title, status("pending"\|"approved")` |
+| `video.review.approved` | `videoId, title` |
+| `video.review.rejected` | `videoId, title, reason` |
+| `video.taken_down` | `videoId, title, reason` |
+| `video.comment.created` | `videoId, videoTitle, commentId, by(评论者用户名), content, parentId` |
+| `report.resolved` | `reportId, action("resolved"\|"dismissed"), note, targetType, targetId` |
+| `account.banned` | `banned_until(ISO8601), reason, hours` |
+
+聊天（personal scope）：
+
+| type | payload 字段 |
+|---|---|
+| `chat.message.new` | `conversationId, conversationType("system"\|"direct"), from?{id,username,nickname}(direct 才有), message{id, conversation_id, sender_id(null=系统), content(direct 为密文 base64), encrypted, iv, created_at}` |
+
+直播间（room scope，进房后接收；同时推给主播 personal）：
+
+| type | payload 字段 |
+|---|---|
+| `live.started` / `live.stopped` | `roomId, roomTitle, owner?；stopped 被断流时附 cut:true, reason` |
+| `live.cut` | `roomId, roomTitle, reason` |
+| `room.user.joined` / `room.user.left` | `roomId, userId(null=游客), username` |
+| `chat.message` | `roomId, userId, username, content`（直播弹幕，区别于私聊 `chat.message.new`） |
+| `mic.requested` | `roomId, micId, userId, username` |
+| `mic.approved` | `roomId, micId, userId, username`；连麦者 personal 通道额外收到 `trtc{sdk_app_id, str_room_id, user_id, user_sig, role:"anchor"}` |
+| `mic.rejected` | `roomId, micId, userId, username` |
+| `mic.live` / `mic.ended` | `roomId, micId, userId, username, rtc_user_id` |
+
+管理员（admin scope，仅管理员账号收到）：
+
+| type | payload 字段 |
+|---|---|
+| `admin.video.uploaded` | `videoId, title, ownerId, ownerName, status, needReview` |
+| `admin.report.created` | `reportId, targetType("video"\|"comment"), targetId, reason, reporter` |
+| `admin.feedback.created` | `conversationId, messageId, userId, username, nickname, content`（用户向系统消息发送的反馈） |
+| `admin.user.banned` | `userId, hours, reason` |
+| `admin.live.started` / `admin.live.stopped` | `roomId, roomTitle, owner?` |
+| `admin.chat.message` | `roomId, userId, username, content` |
+
+系统消息推送：以上 `video.review.approved/rejected`、`video.taken_down`、`report.resolved`、`account.banned`、`video.comment.created` 发生时，服务端还会向用户的「系统消息」会话写入一条可读通知（即同时触发一条 `chat.message.new`）。
 
 ## 五、给 Agent 的提示
 
@@ -150,3 +244,4 @@ POST /api/cdn/nodes/check                      节点健康检查
 - 上传大视频请用 multipart 流式上传，limit 4GB。
 - 直播为「声明式状态」：OBS 推流不会自动标记开播，请在确认推流后调用 `live/start`。
 - 任何 403/503 错误信息均为中文明确原因，请如实转告用户，不要重试绕过。
+- 开发「插件」（监听事件 + 调 API 的常驻程序，如视频上传自动加字幕并过审）请阅读 `<前端url>/plugin.md`。

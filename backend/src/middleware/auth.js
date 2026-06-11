@@ -6,7 +6,7 @@ const db = require('../db/pool');
 
 async function loadUser(id) {
   const { rows } = await db.query(
-    'SELECT id, username, email, role, bio, banned_until, ban_reason, created_at FROM users WHERE id = $1', [id]);
+    'SELECT id, username, nickname, email, role, bio, banned_until, ban_reason, created_at FROM users WHERE id = $1', [id]);
   return rows[0] || null;
 }
 

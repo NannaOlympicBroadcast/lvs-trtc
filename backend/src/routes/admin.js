@@ -4,6 +4,7 @@ const express = require('express');
 const db = require('../db/pool');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { emitToUser, emitToAdmins, emitRoomEvent } = require('../lib/events');
+const { sendSystemMessage } = require('../lib/chat');
 
 const router = express.Router();
 router.use(requireAuth, requireAdmin);
@@ -46,6 +47,7 @@ router.post('/videos/:id/approve', async (req, res, next) => {
       `UPDATE videos SET status = 'approved', reject_reason = NULL WHERE id = $1 RETURNING *`, [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'not found' });
     await emitToUser(rows[0].owner_id, 'video.review.approved', { videoId: rows[0].id, title: rows[0].title });
+    await sendSystemMessage(rows[0].owner_id, `你的视频《${rows[0].title}》已通过审核并上架`);
     res.json(rows[0]);
   } catch (e) { next(e); }
 });
@@ -58,6 +60,7 @@ router.post('/videos/:id/reject', async (req, res, next) => {
       [reason, req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'not found' });
     await emitToUser(rows[0].owner_id, 'video.review.rejected', { videoId: rows[0].id, title: rows[0].title, reason });
+    await sendSystemMessage(rows[0].owner_id, `你的视频《${rows[0].title}》未通过审核：${reason}`);
     res.json(rows[0]);
   } catch (e) { next(e); }
 });
@@ -72,6 +75,7 @@ router.post('/videos/:id/takedown', async (req, res, next) => {
       [reason, req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'not found' });
     await emitToUser(rows[0].owner_id, 'video.taken_down', { videoId: rows[0].id, title: rows[0].title, reason });
+    await sendSystemMessage(rows[0].owner_id, `你的视频《${rows[0].title}》已被下架：${reason}`);
     res.json(rows[0]);
   } catch (e) { next(e); }
 });
@@ -135,6 +139,8 @@ router.post('/users/:id/ban', async (req, res, next) => {
       `UPDATE users SET banned_until = now() + ($1 || ' hours')::interval, ban_reason = $2
        WHERE id = $3 RETURNING banned_until`, [String(hours), reason, target.id]);
     await emitToUser(target.id, 'account.banned', { banned_until: rows[0].banned_until, reason, hours });
+    await sendSystemMessage(target.id,
+      `你的账号已被封禁至 ${new Date(rows[0].banned_until).toLocaleString('zh-CN')}，原因：${reason}`);
     await emitToAdmins('admin.user.banned', { userId: target.id, hours, reason });
     res.json({ ok: true, banned_until: rows[0].banned_until });
   } catch (e) { next(e); }
@@ -159,7 +165,40 @@ router.post('/reports/:id/resolve', async (req, res, next) => {
       `UPDATE reports SET status = $1, resolved_by = $2, resolution_note = $3 WHERE id = $4 RETURNING *`,
       [action, req.user.id, note, req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'not found' });
+    await emitToUser(rows[0].reporter_id, 'report.resolved', {
+      reportId: rows[0].id, action, note, targetType: rows[0].target_type, targetId: rows[0].target_id
+    });
+    await sendSystemMessage(rows[0].reporter_id, action === 'resolved'
+      ? `你的举报（#${rows[0].id}）已受理并处理完成${note ? `：${note}` : ''}`
+      : `你的举报（#${rows[0].id}）经核实暂不处理${note ? `：${note}` : ''}`);
     res.json(rows[0]);
+  } catch (e) { next(e); }
+});
+
+// ---- 用户反馈（系统消息会话中用户发送的内容）----
+router.get('/feedback', async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '100', 10), 500);
+    const { rows } = await db.query(
+      `SELECT m.id, m.conversation_id, m.content, m.created_at,
+              u.id AS user_id, u.username, u.nickname
+       FROM chat_messages m
+       JOIN conversations c ON c.id = m.conversation_id AND c.type = 'system'
+       JOIN users u ON u.id = m.sender_id
+       ORDER BY m.id DESC LIMIT $1`, [limit]);
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
+// 回复某用户的反馈（写入其系统消息会话）body: { content }
+router.post('/feedback/:userId/reply', async (req, res, next) => {
+  try {
+    const content = (req.body && req.body.content || '').trim();
+    if (!content) return res.status(400).json({ error: 'content 必填' });
+    const u = await db.query('SELECT id FROM users WHERE id = $1', [req.params.userId]);
+    if (!u.rows[0]) return res.status(404).json({ error: 'user not found' });
+    const message = await sendSystemMessage(u.rows[0].id, `[管理员回复] ${content}`);
+    res.status(201).json(message);
   } catch (e) { next(e); }
 });
 

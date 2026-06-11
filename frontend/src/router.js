@@ -13,6 +13,8 @@ const routes = [
   { path: '/live/:id', component: () => import('./views/LiveRoom.vue') },
   { path: '/studio/:id', component: () => import('./views/Studio.vue'), meta: { auth: true } },
   { path: '/user/:id', component: () => import('./views/Creator.vue') },
+  { path: '/chat', component: () => import('./views/Chat.vue'), meta: { auth: true } },
+  { path: '/developer', component: () => import('./views/Developer.vue') },
   { path: '/settings', component: () => import('./views/Settings.vue'), meta: { auth: true } },
   { path: '/admin', component: () => import('./views/Admin.vue'), meta: { auth: true, admin: true } }
 ];

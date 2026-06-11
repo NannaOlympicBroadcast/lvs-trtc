@@ -196,6 +196,37 @@ CREATE TABLE IF NOT EXISTS site_settings (
 INSERT INTO site_settings(key, value) VALUES ('review_required', 'true')
   ON CONFLICT (key) DO NOTHING;
 
+-- 显示昵称（为空时回退 username）
+ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname TEXT DEFAULT '';
+-- 端到端加密聊天公钥（ECDH P-256 JWK，私钥仅存于用户浏览器，服务器不可解密私聊内容）
+ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_public_key TEXT;
+
+-- 聊天会话：direct = 用户间端到端加密私聊；system = 系统消息（通知 + 反馈通道，明文，管理员可读）
+CREATE TABLE IF NOT EXISTS conversations (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  type       TEXT NOT NULL DEFAULT 'direct' CHECK (type IN ('direct','system')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS conversation_members (
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id         INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  last_read_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (conversation_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_conv_members_user ON conversation_members(user_id);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id              BIGSERIAL PRIMARY KEY,
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  sender_id       INT REFERENCES users(id) ON DELETE SET NULL,  -- NULL = 系统消息
+  content         TEXT NOT NULL,   -- direct 会话存 AES-GCM 密文(base64)；system 会话存明文
+  encrypted       BOOLEAN NOT NULL DEFAULT false,
+  iv              TEXT,            -- AES-GCM IV(base64)，encrypted=true 时必填
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_conv ON chat_messages(conversation_id, id DESC);
+
 -- 事件存档（审计 / 调试 / 拉取历史）
 CREATE TABLE IF NOT EXISTS events (
   id         BIGSERIAL PRIMARY KEY,

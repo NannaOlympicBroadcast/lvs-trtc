@@ -3,6 +3,30 @@
     <h2>个人设置</h2>
 
     <div class="card form-grid" style="margin-bottom:14px">
+      <h3>个人资料</h3>
+      <div class="row">
+        <input v-model="nickname" placeholder="显示昵称（留空则显示用户名）" style="max-width:260px" />
+        <button @click="saveProfile">保存昵称</button>
+        <span v-if="profileMsg" class="tag ok">{{ profileMsg }}</span>
+      </div>
+      <label class="row" style="gap:6px">
+        <input type="checkbox" style="width:auto" v-model="popupOn" @change="togglePopup" />
+        新聊天消息右下角弹窗提醒
+      </label>
+    </div>
+
+    <div class="card form-grid" style="margin-bottom:14px">
+      <h3>修改密码</h3>
+      <input v-model="pwd.old_password" type="password" placeholder="旧密码" autocomplete="current-password" />
+      <input v-model="pwd.new_password" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password" />
+      <input v-model="pwd.confirm" type="password" placeholder="确认新密码" autocomplete="new-password" />
+      <div class="row">
+        <button @click="changePassword">修改密码</button>
+        <span v-if="pwdMsg" class="tag" :class="pwdOk ? 'ok' : 'warn'">{{ pwdMsg }}</span>
+      </div>
+    </div>
+
+    <div class="card form-grid" style="margin-bottom:14px">
       <h3>API Key</h3>
       <p class="muted">使用 <code>X-API-Key: lvs_xxx</code> 或 <code>Authorization: Bearer lvs_xxx</code> 调用全部 API。</p>
       <div class="row">
@@ -76,6 +100,40 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { api } from '../api';
+import { useAuth } from '../store';
+
+const auth = useAuth();
+const nickname = ref(auth.user && auth.user.nickname || '');
+const profileMsg = ref('');
+const popupOn = ref(localStorage.getItem('lvs_chat_popup') !== 'off');
+const pwd = ref({ old_password: '', new_password: '', confirm: '' });
+const pwdMsg = ref(''), pwdOk = ref(false);
+
+async function saveProfile() {
+  const { user } = await api('/auth/profile', { method: 'PATCH', body: { nickname: nickname.value } });
+  auth.setSession(auth.token, { ...auth.user, ...user });
+  profileMsg.value = '已保存';
+  setTimeout(() => { profileMsg.value = ''; }, 2000);
+}
+
+function togglePopup() {
+  localStorage.setItem('lvs_chat_popup', popupOn.value ? 'on' : 'off');
+}
+
+async function changePassword() {
+  pwdOk.value = false;
+  if (!pwd.value.new_password || pwd.value.new_password.length < 6) { pwdMsg.value = '新密码至少 6 位'; return; }
+  if (pwd.value.new_password !== pwd.value.confirm) { pwdMsg.value = '两次输入的新密码不一致'; return; }
+  try {
+    await api('/auth/password', {
+      method: 'POST',
+      body: { old_password: pwd.value.old_password, new_password: pwd.value.new_password }
+    });
+    pwdOk.value = true;
+    pwdMsg.value = '密码已修改';
+    pwd.value = { old_password: '', new_password: '', confirm: '' };
+  } catch (e) { pwdMsg.value = e.message; }
+}
 
 const keys = ref([]), newKey = ref(''), keyName = ref('');
 const webhooks = ref([]), events = ref([]);

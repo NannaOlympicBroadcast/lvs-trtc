@@ -46,6 +46,15 @@ docker compose up -d --build
 - 管理员断流：标记下播 + 广播 `live.cut`，本站前端（主播/观众）收到后立即退出 TRTC 房间（协同断流，不调用腾讯云服务端踢人 API）。
 - 录制：原 SRS 服务端录制已移除；历史录制文件仍可在 API 查询/下载。如需录制请使用腾讯云 TRTC 云端录制。
 
+**个人资料**：设置页可修改显示昵称（站内评论/聊天展示，留空回退用户名）与登录密码（旧密码 + 新密码 + 确认）。
+
+**聊天（端到端加密）**：导航「消息」进入聊天页。
+- 私聊：ECDH(P-256) 协商共享密钥 + AES-256-GCM 端到端加密，私钥仅存于浏览器 localStorage，服务器只保存公钥与密文（换浏览器/清缓存后历史消息不可解密，局域网场景取舍）。
+- 系统消息：每个用户默认有一个「系统消息」会话，接收站点通知（视频审核结果、举报受理、视频下架、账号封禁、新评论）；用户向该会话发送的内容作为**反馈**直达管理员（实时 WebSocket 事件 `admin.feedback.created`，后台「用户反馈」标签页可查看/回复，亦可 `GET /api/admin/feedback` 查询）。
+- 新消息会在右下角弹窗提醒（可点「不再弹窗」或在设置页开关）。
+
+**开发者中心**：导航「开发者」页指导通过 API + WebSocket/Webhook 事件开发插件（如「视频上传自动添加字幕并审核」），并提供一键让 Claude 开发插件的入口；面向 Agent 的插件指南托管于 `/plugin.md`。
+
 **CDN（仅公网 CDN）**：管理后台可添加公网 CDN 节点（腾讯云 CDN / Cloudflare 等）：将 CDN 源站指向本站（回源 `/storage/` 路径），在管理后台填写其访问域名（如 `https://cdn.example.com`）。点播播放在启用节点间轮询调度，`?cdn=off` 强制回源；健康检查为根路径可达性探测。局域网自建 cdn-edge 边缘节点已移除。
 
 **Agent 接入**：`/agents.md` 提供面向 AI Agent 的全量接口说明（按管理员/主播/普通用户分节）；「个人设置」页一键生成发给 Agent 的提示词（含站点地址与 API Key 占位）。
@@ -87,9 +96,12 @@ GET|POST|PATCH|DELETE /api/cdn/nodes   公网 CDN 节点管理
 
 | 角色 | 事件 |
 |---|---|
-| 创作者 | video.uploaded, video.review.approved/rejected, video.taken_down, video.comment.created, account.banned |
+| 创作者 | video.uploaded, video.review.approved/rejected, video.taken_down, video.comment.created, report.resolved, account.banned |
+| 聊天 | chat.message.new（系统通知/私聊新消息，私聊 content 为密文） |
 | 主播/直播间 | live.started, live.stopped, live.cut, room.user.joined/left, chat.message, mic.requested/approved/rejected/live/ended |
-| 管理员 | admin.video.uploaded, admin.live.started/stopped, admin.chat.message, admin.report.created, admin.user.banned |
+| 管理员 | admin.video.uploaded, admin.live.started/stopped, admin.chat.message, admin.report.created, admin.feedback.created, admin.user.banned |
+
+各事件 payload 字段（schema）见站点 `/agents.md` 第四节；插件开发指南见 `/plugin.md`。
 
 ## 目录结构
 
