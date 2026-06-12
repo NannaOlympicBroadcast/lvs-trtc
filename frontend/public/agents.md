@@ -13,6 +13,24 @@
 - 请求/响应均为 JSON（上传除外，multipart/form-data）；出错时返回 `{ "error": "原因" }` 与对应 HTTP 状态码。
 - 直播连麦基于腾讯云 TRTC：相关接口返回 TRTC 进房参数（`sdk_app_id` / `str_room_id` / `user_id` / `user_sig` / `role`）。服务端未配置 TRTC 凭证时这些接口返回明确错误（HTTP 503），不会降级。
 
+## MCP 服务器（Streamable HTTP + MCP Apps 交互式 UI）
+
+不想逐个调 REST 接口的 Agent / MCP 宿主可直接接入站点 MCP 服务器：
+
+- 接入串：`<前端url>/mcp?key=<你的API-Key>`（Streamable HTTP 无状态模式，POST JSON-RPC；也可改用 `X-API-Key` / `Authorization: Bearer` 头携带 Key）。
+- 实现 MCP Apps 扩展（SEP-1865，capability `io.modelcontextprotocol/ui`，MIME `text/html;profile=mcp-app`）：在支持 MCP Apps 的宿主（如 ChatGPT、Claude 等）中，`search_videos` / `search_live_rooms` 会渲染交互式卡片列表，用户可在卡片上**一键收藏视频**或**跳转视频页/直播间**；不支持的宿主则回退为纯文本结果。
+- 工具一览：
+
+```
+search_videos        {query?, limit?}                      搜索公开视频（卡片 UI）
+search_live_rooms    {query?}                              直播间列表，直播中优先（卡片 UI）
+get_video            {video_id, password?}                 视频详情
+get_video_play_url   {video_id, password?, cdn?("off")}    视频文件播放/下载直链
+get_video_subtitles  {video_id, password?, include_content?}  字幕列表（可含 VTT 文本）
+get_video_comments   {video_id, password?, limit?}         评论列表
+favorite_video       {video_id, collection_name?}          一键收藏（默认收藏夹「我的收藏」，自动创建）
+```
+
 ---
 
 ## 一、普通用户接口
