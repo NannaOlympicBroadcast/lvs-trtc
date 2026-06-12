@@ -57,6 +57,14 @@
         <button @click="copyAgentPrompt">复制提示词</button>
         <span v-if="copied" class="tag ok">已复制</span>
       </div>
+      <p class="muted">
+        也可以把本站作为 MCP 服务器接入（Streamable HTTP，支持 MCP Apps 交互式卡片：检索视频/直播间、一键收藏、跳转播放页/直播间，以及视频详情/直链/字幕/评论工具）：
+      </p>
+      <div class="row">
+        <input readonly :value="mcpUrl" style="font-family:monospace;flex:1" />
+        <button @click="copyMcpUrl">复制 MCP 地址</button>
+        <span v-if="mcpCopied" class="tag ok">已复制</span>
+      </div>
       <p v-if="!newKey" class="muted">提示：API Key 完整值仅在创建时显示一次；上面模板中的 Key 占位符需替换为你保存的真实 Key。</p>
     </div>
 
@@ -144,12 +152,23 @@ const copied = ref(false);
 const agentsDocUrl = computed(() => `${location.origin}/agents.md`);
 const agentPrompt = computed(() =>
   `请阅读\`${agentsDocUrl.value}\`，然后执行_____操作，你的api-key为\`${newKey.value || '<你的API-KEY>'}\``);
+// MCP 接入串（Streamable HTTP；search_videos/search_live_rooms 支持 MCP Apps 卡片 UI）
+const mcpUrl = computed(() => `${location.origin}/mcp?key=${newKey.value || '<你的API-KEY>'}`);
+const mcpCopied = ref(false);
 
 async function copyAgentPrompt() {
   try {
     await navigator.clipboard.writeText(agentPrompt.value);
     copied.value = true;
     setTimeout(() => { copied.value = false; }, 2000);
+  } catch { alert('复制失败，请手动选择文本复制'); }
+}
+
+async function copyMcpUrl() {
+  try {
+    await navigator.clipboard.writeText(mcpUrl.value);
+    mcpCopied.value = true;
+    setTimeout(() => { mcpCopied.value = false; }, 2000);
   } catch { alert('复制失败，请手动选择文本复制'); }
 }
 

@@ -32,6 +32,9 @@ async function main() {
   app.use('/api/admin', require('./routes/admin'));
   app.use('/api/cdn', require('./routes/cdn'));
 
+  // MCP 服务器（Streamable HTTP + MCP Apps UI），接入串：<站点url>/mcp?key=<API Key>
+  app.use('/mcp', require('./routes/mcp'));
+
   app.use(errorHandler);
 
   const server = http.createServer(app);

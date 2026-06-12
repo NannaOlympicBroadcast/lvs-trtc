@@ -59,6 +59,8 @@ docker compose up -d --build
 
 **Agent 接入**：`/agents.md` 提供面向 AI Agent 的全量接口说明（按管理员/主播/普通用户分节）；「个人设置」页一键生成发给 Agent 的提示词（含站点地址与 API Key 占位）。
 
+**MCP 服务器（含 MCP Apps 交互式 UI）**：站点暴露 Streamable HTTP MCP 服务器，接入串 `<站点url>/mcp?key=<API Key>`。工具覆盖视频检索、直播间检索、视频详情/播放直链/字幕/评论、一键收藏；在支持 MCP Apps（SEP-1865）的宿主中，检索结果渲染为交互式卡片列表，可直接收藏视频或跳转视频页/直播间。
+
 ## 开放 API
 
 认证二选一：`Authorization: Bearer <JWT>` 或 `X-API-Key: lvs_xxx`（设置页创建，全功能）。
