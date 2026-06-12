@@ -107,13 +107,25 @@ const HOST_ADAPTER_JS = `
       else if (m.method === 'ui/notifications/host-context-changed') { applyTheme((m.params || {}).theme); }
       else if (m.id !== undefined) { post({ jsonrpc: '2.0', id: m.id, result: {} }); } // 如 ui/resource-teardown
     });
+    function reportSize() {
+      notify('ui/notifications/size-changed', {
+        width: document.documentElement.scrollWidth,
+        height: document.documentElement.scrollHeight + 4
+      });
+    }
     request('ui/initialize', {
-      appInfo: { name: 'lvs-mcp-app', version: '1.0.0' },
-      appCapabilities: {}
+      protocolVersion: '2026-01-26',
+      capabilities: {},
+      clientInfo: { name: 'lvs-mcp-app', version: '1.0.0' },
+      appCapabilities: { availableDisplayModes: ['inline'] }
     }).then(function (res) {
       var ctx = (res && res.hostContext) || {};
       applyTheme(ctx.theme);
-      notify('notifications/initialized');
+      notify('ui/notifications/initialized');
+      reportSize(); // 初始尺寸：宿主收到后才会显示 iframe
+      if (window.ResizeObserver) {
+        new ResizeObserver(function () { reportSize(); }).observe(document.body);
+      }
     }).catch(function () { /* 宿主未实现标准桥时静默（如 ChatGPT） */ });
 
     // ---- 统一接口 ----
@@ -132,7 +144,7 @@ const HOST_ADAPTER_JS = `
       },
       reportSize: function () {
         if (window.openai) return; // Apps SDK 宿主自动布局
-        notify('ui/notifications/size-changed', { height: document.documentElement.scrollHeight + 4 });
+        reportSize();
       }
     };
   })();
