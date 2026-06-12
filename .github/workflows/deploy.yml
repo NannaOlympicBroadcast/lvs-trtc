@@ -1,0 +1,18 @@
+# 手动触发：把当前分支代码部署到生产服务器（SFTP + docker compose 重建）
+# 前置：在仓库 Settings → Secrets and variables → Actions 添加 REMOTE_SSH_PASSWORD
+name: Deploy to server
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sshpass
+        run: sudo apt-get update -q && sudo apt-get install -y -q sshpass
+      - name: Deploy via SFTP
+        env:
+          REMOTE_SSH_PASSWORD: ${{ secrets.REMOTE_SSH_PASSWORD }}
+        run: ./deploy.sh

@@ -11,7 +11,7 @@ const router = express.Router();
 router.get('/:id', optionalAuth, async (req, res, next) => {
   try {
     const { rows } = await db.query(
-      'SELECT id, username, bio, created_at FROM users WHERE id = $1', [req.params.id]);
+      'SELECT id, username, nickname, bio, created_at FROM users WHERE id = $1', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'user not found' });
     const stats = await db.query(
       `SELECT count(*)::int AS video_count, COALESCE(sum(views),0)::bigint AS total_views

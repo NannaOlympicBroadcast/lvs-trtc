@@ -76,7 +76,7 @@
           </div>
           <p v-else class="muted"><router-link to="/login">登录</router-link>后参与评论</p>
           <div v-for="c in topComments" :key="c.id" style="margin-bottom:12px">
-            <div><strong>{{ c.username }}</strong> <span class="muted">{{ fmtTime(c.created_at) }}</span></div>
+            <div><strong>{{ c.display_name || c.username }}</strong> <span class="muted">{{ fmtTime(c.created_at) }}</span></div>
             <div>{{ c.content }}</div>
             <div class="row muted" style="font-size:13px">
               <a href="#" @click.prevent="replyTo = c">回复</a>
@@ -84,7 +84,7 @@
               <a href="#" v-if="canDelete(c)" @click.prevent="delComment(c)" style="color:var(--danger)">删除</a>
             </div>
             <div v-for="r in repliesOf(c.id)" :key="r.id" style="margin:8px 0 0 24px">
-              <div><strong>{{ r.username }}</strong> <span class="muted">{{ fmtTime(r.created_at) }}</span></div>
+              <div><strong>{{ r.display_name || r.username }}</strong> <span class="muted">{{ fmtTime(r.created_at) }}</span></div>
               <div>{{ r.content }}</div>
               <div class="row muted" style="font-size:13px">
                 <a href="#" v-if="auth.loggedIn" @click.prevent="reportComment(r)">举报</a>

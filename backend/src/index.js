@@ -22,6 +22,7 @@ async function main() {
   app.use('/api/keys', require('./routes/apikeys'));
   app.use('/api/me/webhooks', require('./routes/webhooks'));
   app.use('/api/users', require('./routes/users'));
+  app.use('/api/chat', require('./routes/chat'));
   app.use('/api/videos/:videoId/comments', require('./routes/comments'));
   app.use('/api/videos/:videoId/subtitles', require('./routes/subtitles'));
   app.use('/api/videos', require('./routes/videos'));

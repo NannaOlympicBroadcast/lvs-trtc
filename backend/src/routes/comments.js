@@ -4,6 +4,7 @@ const express = require('express');
 const db = require('../db/pool');
 const { optionalAuth, requireAuth } = require('../middleware/auth');
 const { emitToUser } = require('../lib/events');
+const { sendSystemMessage } = require('../lib/chat');
 const { canAccess } = require('./videos');
 
 const router = express.Router({ mergeParams: true });
@@ -21,7 +22,8 @@ router.get('/', optionalAuth, async (req, res, next) => {
     const v = await getVisibleVideo(req.params.videoId, req.user, req.query.password);
     if (!v) return res.status(404).json({ error: 'video not found' });
     const { rows } = await db.query(
-      `SELECT c.id, c.parent_id, c.content, c.created_at, c.deleted, u.id AS user_id, u.username
+      `SELECT c.id, c.parent_id, c.content, c.created_at, c.deleted, u.id AS user_id, u.username,
+              COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
        FROM comments c JOIN users u ON u.id = c.user_id
        WHERE c.video_id = $1 ORDER BY c.id ASC LIMIT 500`, [req.params.videoId]);
     res.json(rows.map((c) => c.deleted ? { ...c, content: '[已删除]' } : c));
@@ -48,6 +50,8 @@ router.post('/', requireAuth, async (req, res, next) => {
         videoId: v.id, videoTitle: v.title, commentId: rows[0].id,
         by: req.user.username, content: rows[0].content, parentId: parent_id || null
       });
+      await sendSystemMessage(v.owner_id,
+        `「${req.user.nickname || req.user.username}」评论了你的视频《${v.title}》：${rows[0].content.slice(0, 200)}`);
     }
     res.status(201).json({ ...rows[0], username: req.user.username });
   } catch (e) { next(e); }

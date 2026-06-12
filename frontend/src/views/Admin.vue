@@ -58,6 +58,21 @@
       <p v-if="!reports.length" class="muted">暂无待处理举报</p>
     </div>
 
+    <!-- 用户反馈（系统消息会话） -->
+    <div v-show="tab === 'feedback'" class="card">
+      <p class="muted">用户在「消息 → 系统消息」中发送的内容会作为反馈出现在这里（也可通过 <code>GET /api/admin/feedback</code> 查询；新反馈实时推送 WebSocket 事件 <code>admin.feedback.created</code>）。</p>
+      <table>
+        <tr><th>用户</th><th>内容</th><th>时间</th><th>操作</th></tr>
+        <tr v-for="f in feedback" :key="f.id">
+          <td><router-link :to="`/user/${f.user_id}`">{{ f.nickname || f.username }}</router-link></td>
+          <td style="max-width:420px;word-break:break-word">{{ f.content }}</td>
+          <td class="muted">{{ new Date(f.created_at).toLocaleString() }}</td>
+          <td><button class="ghost" @click="replyFeedback(f)">回复</button></td>
+        </tr>
+      </table>
+      <p v-if="!feedback.length" class="muted">暂无反馈</p>
+    </div>
+
     <!-- 用户 -->
     <div v-show="tab === 'users'" class="card">
       <div class="row" style="margin-bottom:10px">
@@ -141,12 +156,14 @@ import { createWS } from '../ws';
 
 const tabs = [
   { key: 'review', name: '视频审核' }, { key: 'reports', name: '举报' },
+  { key: 'feedback', name: '用户反馈' },
   { key: 'users', name: '用户' }, { key: 'rooms', name: '直播间' },
   { key: 'cdn', name: 'CDN 节点' }, { key: 'events', name: '实时事件' }
 ];
 const tab = ref('review');
 const videos = ref([]), videoStatus = ref('pending'), reviewRequired = ref(true);
 const reports = ref([]), users = ref([]), userQ = ref(''), rooms = ref([]), nodes = ref([]);
+const feedback = ref([]);
 const cdnForm = ref({ name: '', base_url: '' });
 const health = ref({});
 const liveEvents = ref([]), wsOk = ref(false);
@@ -156,6 +173,7 @@ function switchTab(k) {
   tab.value = k;
   if (k === 'review') loadVideos();
   if (k === 'reports') loadReports();
+  if (k === 'feedback') loadFeedback();
   if (k === 'users') loadUsers();
   if (k === 'rooms') loadRooms();
   if (k === 'cdn') loadNodes();
@@ -185,6 +203,12 @@ async function takedown(v) {
 async function loadReports() { reports.value = await api('/admin/reports?status=open'); }
 async function resolveReport(r, action) {
   await api(`/admin/reports/${r.id}/resolve`, { method: 'POST', body: { action } }); loadReports();
+}
+
+async function loadFeedback() { feedback.value = await api('/admin/feedback'); }
+async function replyFeedback(f) {
+  const content = prompt(`回复 ${f.nickname || f.username}：`); if (!content) return;
+  await api(`/admin/feedback/${f.user_id}/reply`, { method: 'POST', body: { content } });
 }
 
 async function loadUsers() { users.value = await api(`/admin/users?q=${encodeURIComponent(userQ.value)}`); }
