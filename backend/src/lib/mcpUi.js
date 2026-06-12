@@ -1,7 +1,10 @@
 'use strict';
 // MCP Apps（SEP-1865）UI 资源：嵌入宿主沙箱 iframe 的 HTML 模板。
-// 模板是静态的（宿主可预取缓存），数据由 ui/notifications/tool-result 推入；
-// iframe 与宿主之间通过 postMessage 走 MCP JSON-RPC（ui/initialize、tools/call、ui/open-link 等）。
+// 模板是静态的（宿主可预取缓存），数据由宿主推入。兼容两类宿主：
+// 1. 标准 MCP Apps 桥：postMessage 上的 MCP JSON-RPC（ui/initialize、
+//    ui/notifications/tool-result、tools/call、ui/open-link）
+// 2. OpenAI Apps SDK（ChatGPT）：window.openai 全局对象
+//    （toolOutput / openai:set_globals 事件 / callTool / openExternal）
 // 注意：内嵌脚本只用字符串拼接，避免与外层模板字符串的 ${} 冲突。
 
 const SHARED_CSS = `
@@ -42,12 +45,47 @@ const SHARED_CSS = `
   button.done { color: var(--ok); border-color: var(--ok); }
 `;
 
-// iframe ↔ 宿主桥：MCP JSON-RPC over postMessage（视图先发 ui/initialize，宿主推 tool-result）
-const BRIDGE_JS = `
+// 宿主适配层：统一暴露 window.lvsHost = { onData, callTool, openLink, reportSize }
+const HOST_ADAPTER_JS = `
   (function () {
     'use strict';
+    var dataCb = null, lastData = null;
+    function applyTheme(theme) {
+      if (theme) document.documentElement.setAttribute('data-theme', theme);
+    }
+    function emit(sc) {
+      lastData = sc || {};
+      if (dataCb) dataCb(lastData);
+    }
+
+    // ---- 宿主类型 B：OpenAI Apps SDK（ChatGPT，window.openai 全局） ----
+    function normalizeOutput(out) {
+      // toolOutput 可能是 structuredContent 本身，也可能包了一层
+      if (out && typeof out === 'object' && out.structuredContent) return out.structuredContent;
+      return out;
+    }
+    function pollOpenAi() {
+      if (!window.openai) return false;
+      if (window.openai.theme) applyTheme(window.openai.theme);
+      if (window.openai.toolOutput) { emit(normalizeOutput(window.openai.toolOutput)); return true; }
+      return false;
+    }
+    window.addEventListener('openai:set_globals', function (ev) {
+      var g = ev.detail && ev.detail.globals;
+      if (!g) return;
+      if (g.theme) applyTheme(g.theme);
+      if (g.toolOutput) emit(normalizeOutput(g.toolOutput));
+    }, { passive: true });
+    // window.openai 注入与 toolOutput 就绪可能晚于本脚本执行，轮询一小段时间
+    var tries = 0;
+    var poll = setInterval(function () {
+      if (pollOpenAi() || ++tries > 40) clearInterval(poll);
+    }, 100);
+    pollOpenAi();
+
+    // ---- 宿主类型 A：标准 MCP Apps 桥（postMessage JSON-RPC） ----
     var nextId = 1, pending = {};
-    function post(msg) { window.parent.postMessage(msg, '*'); }
+    function post(msg) { try { window.parent.postMessage(msg, '*'); } catch (e) {} }
     function request(method, params) {
       return new Promise(function (resolve, reject) {
         var id = nextId++;
@@ -56,9 +94,6 @@ const BRIDGE_JS = `
       });
     }
     function notify(method, params) { post({ jsonrpc: '2.0', method: method, params: params || {} }); }
-    function applyHostContext(ctx) {
-      if (ctx && ctx.theme) document.documentElement.setAttribute('data-theme', ctx.theme);
-    }
     window.addEventListener('message', function (ev) {
       var m = ev.data;
       if (!m || m.jsonrpc !== '2.0') return;
@@ -67,22 +102,39 @@ const BRIDGE_JS = `
         if (p) { delete pending[m.id]; if (m.error) p.reject(m.error); else p.resolve(m.result); }
         return;
       }
-      if (m.method === 'ui/notifications/tool-result') { window.__onToolResult && window.__onToolResult(m.params || {}); }
+      if (m.method === 'ui/notifications/tool-result') { emit((m.params || {}).structuredContent); }
       else if (m.method === 'ui/notifications/tool-input') { window.__onToolInput && window.__onToolInput(m.params || {}); }
-      else if (m.method === 'ui/notifications/host-context-changed') { applyHostContext(m.params || {}); }
+      else if (m.method === 'ui/notifications/host-context-changed') { applyTheme((m.params || {}).theme); }
       else if (m.id !== undefined) { post({ jsonrpc: '2.0', id: m.id, result: {} }); } // 如 ui/resource-teardown
     });
-    function reportSize() {
-      notify('ui/notifications/size-changed', { height: document.documentElement.scrollHeight + 4 });
-    }
-    window.mcpBridge = { request: request, notify: notify, reportSize: reportSize };
     request('ui/initialize', {
       appInfo: { name: 'lvs-mcp-app', version: '1.0.0' },
       appCapabilities: {}
     }).then(function (res) {
-      applyHostContext((res && res.hostContext) || {});
+      var ctx = (res && res.hostContext) || {};
+      applyTheme(ctx.theme);
       notify('notifications/initialized');
-    }).catch(function () { /* 宿主未实现时静默 */ });
+    }).catch(function () { /* 宿主未实现标准桥时静默（如 ChatGPT） */ });
+
+    // ---- 统一接口 ----
+    window.lvsHost = {
+      onData: function (cb) { dataCb = cb; if (lastData) cb(lastData); },
+      callTool: function (name, args) {
+        if (window.openai && window.openai.callTool) return window.openai.callTool(name, args);
+        return request('tools/call', { name: name, arguments: args });
+      },
+      openLink: function (url) {
+        if (window.openai && window.openai.openExternal) {
+          try { window.openai.openExternal({ href: url }); } catch (e) {}
+          return;
+        }
+        request('ui/open-link', { url: url }).catch(function () {});
+      },
+      reportSize: function () {
+        if (window.openai) return; // Apps SDK 宿主自动布局
+        notify('ui/notifications/size-changed', { height: document.documentElement.scrollHeight + 4 });
+      }
+    };
   })();
 `;
 
@@ -94,7 +146,6 @@ const HELPERS_JS = `
     function p(n) { return (n < 10 ? '0' : '') + n; }
     return (h ? h + ':' + p(m) : String(m)) + ':' + p(s);
   }
-  function openLink(url) { window.mcpBridge.request('ui/open-link', { url: url }).catch(function () {}); }
 `;
 
 const VIDEO_LIST_JS = `
@@ -102,17 +153,16 @@ const VIDEO_LIST_JS = `
   window.__onToolInput = function () {
     document.getElementById('app').innerHTML = '<div class="empty">正在检索视频…</div>';
   };
-  window.__onToolResult = function (params) {
-    var sc = params.structuredContent || {};
+  window.lvsHost.onData(function (sc) {
     state.site = sc.site_url || '';
     state.videos = sc.videos || [];
     render(sc);
-  };
+  });
   function render(sc) {
     var el = document.getElementById('app');
     if (!state.videos.length) {
       el.innerHTML = '<div class="empty">没有找到匹配的视频</div>';
-      window.mcpBridge.reportSize();
+      window.lvsHost.reportSize();
       return;
     }
     var html = '<div class="head">' +
@@ -131,7 +181,7 @@ const VIDEO_LIST_JS = `
         '</div></div></div>';
     });
     el.innerHTML = html + '</div>';
-    window.mcpBridge.reportSize();
+    window.lvsHost.reportSize();
   }
   document.getElementById('app').addEventListener('click', function (ev) {
     var btn = ev.target.closest('button[data-act]');
@@ -140,12 +190,12 @@ const VIDEO_LIST_JS = `
     var v = state.videos.filter(function (x) { return x.id === id; })[0];
     if (!v) return;
     if (btn.getAttribute('data-act') === 'open') {
-      openLink(v.page_url || (state.site + '/video/' + id));
+      window.lvsHost.openLink(v.page_url || (state.site + '/video/' + id));
       return;
     }
     btn.disabled = true;
     btn.textContent = '收藏中…';
-    window.mcpBridge.request('tools/call', { name: 'favorite_video', arguments: { video_id: id } })
+    Promise.resolve(window.lvsHost.callTool('favorite_video', { video_id: id }))
       .then(function (r) {
         if (r && r.isError) throw new Error('failed');
         btn.textContent = '✓ 已收藏';
@@ -163,17 +213,16 @@ const LIVE_LIST_JS = `
   window.__onToolInput = function () {
     document.getElementById('app').innerHTML = '<div class="empty">正在获取直播间…</div>';
   };
-  window.__onToolResult = function (params) {
-    var sc = params.structuredContent || {};
+  window.lvsHost.onData(function (sc) {
     state.site = sc.site_url || '';
     state.rooms = sc.rooms || [];
     render(sc);
-  };
+  });
   function render(sc) {
     var el = document.getElementById('app');
     if (!state.rooms.length) {
       el.innerHTML = '<div class="empty">暂无直播间</div>';
-      window.mcpBridge.reportSize();
+      window.lvsHost.reportSize();
       return;
     }
     var liveCount = state.rooms.filter(function (r) { return r.is_live; }).length;
@@ -193,14 +242,14 @@ const LIVE_LIST_JS = `
         '</div></div></div>';
     });
     el.innerHTML = html + '</div>';
-    window.mcpBridge.reportSize();
+    window.lvsHost.reportSize();
   }
   document.getElementById('app').addEventListener('click', function (ev) {
     var btn = ev.target.closest('button[data-id]');
     if (!btn) return;
     var id = btn.getAttribute('data-id');
     var r = state.rooms.filter(function (x) { return x.id === id; })[0];
-    openLink((r && r.page_url) || (state.site + '/live/' + id));
+    window.lvsHost.openLink((r && r.page_url) || (state.site + '/live/' + id));
   });
 `;
 
@@ -215,7 +264,7 @@ function page(title, initialText, scriptJs) {
 </head>
 <body>
 <div id="app"><div class="empty">${initialText}</div></div>
-<script>${BRIDGE_JS}</script>
+<script>${HOST_ADAPTER_JS}</script>
 <script>${HELPERS_JS}${scriptJs}</script>
 </body>
 </html>`;
