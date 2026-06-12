@@ -36,8 +36,13 @@ const UI_RESOURCES = [
 ];
 
 function uiResourceMeta() {
-  // 缩略图等静态资源来自本站源（/storage 反代），需在 CSP 中放行
-  return { ui: { prefersBorder: true, csp: { connectDomains: [], resourceDomains: [config.publicBaseUrl] } } };
+  // 缩略图等静态资源来自本站源（/storage 反代），需在 CSP 中放行；
+  // openai/* 键为 OpenAI Apps SDK 宿主（ChatGPT）的兼容别名
+  return {
+    ui: { prefersBorder: true, csp: { connectDomains: [], resourceDomains: [config.publicBaseUrl] } },
+    'openai/widgetCSP': { connect_domains: [], resource_domains: [config.publicBaseUrl] },
+    'openai/widgetPrefersBorder': true
+  };
 }
 
 // ---- 工具定义 ----
